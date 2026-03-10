@@ -1,4 +1,7 @@
 <?php
+header("Content-Security-Policy: default-src 'self'; script-src 'none'; style-src 'self' 'unsafe-inline';");
+?>
+<?php
 session_start();
 require_once __DIR__ . '/dotenv.php';
 

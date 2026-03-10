@@ -17,28 +17,37 @@ $dbName = $_ENV['DB_NAME'] ?? 'backend';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = json_decode(file_get_contents('php://input'), true);
-    $username = $input['username'] ?? '';
-    $email = $input['email'] ?? '';
+    $username = trim($input['username'] ?? '');
+    $email = trim($input['email'] ?? '');
     $password = $input['password'] ?? '';
 
-    $conn = new mysqli($host, $user, $pass, $dbName);
-
-    if ($conn->connect_error) {
-        echo json_encode(['error' => 'La connexion à la base de données a échoué']);
-        exit();
+    // 1. Basic Validation
+    if (empty($username) || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 8) {
+        echo json_encode(['error' => 'Données invalides ou mot de passe trop court.']);
+        exit;
     }
 
-    $query = "INSERT INTO users (username, email, password, role) VALUES ('$username', '$email', '$password', 'user')";
-    
-    if ($conn->query($query) === TRUE) {
-        echo json_encode(['success' => true, 'message' => 'Inscription réussie !']);
-    } else {
-        echo json_encode(['error' => 'Erreur : ' . $conn->error]);
+    // 2. Secure Connection (Using PDO is recommended over mysqli for better error handling)
+    try {
+        $dsn = "mysql:host=$host;dbname=$dbName;charset=utf8mb4";
+        $pdo = new PDO($dsn, $user, $pass, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
+        ]);
+
+        // 3. Hash the password (using modern Argon2 or Bcrypt)
+        $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
+
+        // 4. Prepared Statement
+        $stmt = $pdo->prepare("INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, 'user')");
+        
+        if ($stmt->execute([$username, $email, $hashedPassword])) {
+            echo json_encode(['success' => true, 'message' => 'Inscription réussie !']);
+        }
+
+    } catch (PDOException $e) {
+        // 5. Professional Error Handling (Log it, don't show it)
+        error_log("Registration Error: " . $e->getMessage());
+        echo json_encode(['error' => 'Une erreur est survenue lors de l\'inscription.']);
     }
-    
-    $conn->close();
-} else {
-    http_response_code(405);
-    echo json_encode(['error' => 'Méthode non autorisée']);
 }
 ?>
