@@ -1,5 +1,8 @@
 <?php
-header("Content-Security-Policy: default-src 'self'; script-src 'none'; style-src 'self' 'unsafe-inline';");
+header("Access-Control-Allow-Origin: *"); 
+header("Access-Control-Allow-Methods: POST, GET, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type");
+header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';");
 
 session_start();
 require_once __DIR__ . '/dotenv.php';
@@ -22,7 +25,10 @@ if ($conn->connect_error) {
 
 // Handle post submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['content'])) {
-    $content = $_POST['content'];
+    $json = file_get_contents('php://input');
+    $data = json_decode($json, true);
+    $content = $data['content'] ?? '';
+    $user_id = $_SESSION['user_id'] ?? null;
     
     // Use the ID from your session
     $user_id = $_SESSION['user_id'] ?? null;
@@ -34,10 +40,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['content'])) {
         // Use "s" for string if your ID is a UUID like '0d503928', or "i" if it is an integer
         $stmt->bind_param("ss", $user_id, $content); 
         
-        if (!$stmt->execute()) {
-            error_log("Query failed: " . $stmt->error);
+         if ($stmt->execute()) {
+            // Réponse JSON pour ton JavaScript fetch()
+            echo json_encode(["success" => true, "message" => "Post publié !"]);
+        } else {
+            echo json_encode(["success" => false, "error" => $stmt->error]);
         }
         $stmt->close();
+        exit(); // Important pour ne pas envoyer le HTML du reste de la page
         
         // Redirect to avoid resubmitting on refresh
         header("Location: " . $_SERVER['PHP_SELF']);

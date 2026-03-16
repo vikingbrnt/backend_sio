@@ -1,72 +1,71 @@
 <?php
-session_start();
-require_once __DIR__ . '/dotenv.php';
+session_start(); // Starts a new session or resumes the existing one to track user state
+require_once __DIR__ . '/dotenv.php'; // Includes the environment file to load sensitive credentials like DB_PASS
 
 // Database Configuration
-$host = $_ENV['DB_HOST'] ?? 'localhost';
-$user = $_ENV['DB_USER'] ?? 'root';
-$pass = $_ENV['DB_PASS'] ?? '';
-$dbName = $_ENV['DB_NAME'] ?? 'backend';
+$host = $_ENV['DB_HOST'] ?? 'localhost'; // Sets database host from environment variable or defaults to localhost
+$user = $_ENV['DB_USER'] ?? 'root'; // Sets database username from environment or defaults to root
+$pass = $_ENV['DB_PASS'] ?? ''; // Sets database password from environment or defaults to an empty string
+$dbName = $_ENV['DB_NAME'] ?? 'backend'; // Sets the target database name from environment or defaults to backend
 
 // Handle JSON POST requests
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    header('Content-Type: application/json');
-    $input = json_decode(file_get_contents('php://input'), true);
+if ($_SERVER['REQUEST_METHOD'] === 'POST') { // Only executes the following code if the request type is POST
+    header('Content-Type: application/json'); // Tells the browser to expect a response in JSON format
+    $input = json_decode(file_get_contents('php://input'), true); // Reads raw JSON input and converts it to a PHP array
     
-    $username = trim($input['username'] ?? '');
-    $email = trim($input['email'] ?? '');
-    $password = $input['password'] ?? '';
-    $ip = $_SERVER['REMOTE_ADDR'];
+    $username = trim($input['username'] ?? ''); // Gets username from input and removes extra spaces
+    $email = trim($input['email'] ?? ''); // Gets email from input and removes extra spaces
+    $password = $input['password'] ?? ''; // Gets password from input (no trim to preserve user's intended spaces)
+    $ip = $_SERVER['REMOTE_ADDR']; // Captures the user's IP address to track who is sending the request
 
-    try {
-        $dsn = "mysql:host=$host;dbname=$dbName;charset=utf8mb4";
-        $pdo = new PDO($dsn, $user, $pass, [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
-        ]);
+    try { // Starts a try block to catch any database errors that might occur
+        $dsn = "mysql:host=$host;dbname=$dbName;charset=utf8mb4"; // Defines the Data Source Name string for the connection
+        $pdo = new PDO($dsn, $user, $pass, [ // Attempts to create a new database connection object
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION // Configures PDO to throw exceptions if a query fails
+        ]); // Ends the PDO constructor call
 
-        // --- PROTECTION 1: Rate Limiting (Brute Force/Spam Prevention) ---
-        // Limits an IP to 3 registration attempts every 5 minutes
-        $stmtLimit = $pdo->prepare("SELECT COUNT(*) FROM rate_limits WHERE ip_address = ? AND attempt_time > NOW() - INTERVAL 5 MINUTE");
-        $stmtLimit->execute([$ip]);
-        if ($stmtLimit->fetchColumn() >= 3) {
-            http_response_code(429);
-            echo json_encode(['error' => 'Too many attempts. Please try again in 5 minutes.']);
-            exit;
+        // --- PROTECTION 1: Rate Limiting ---
+        $stmtLimit = $pdo->prepare("SELECT COUNT(*) FROM rate_limits WHERE ip_address = ? AND attempt_time > NOW() - INTERVAL 5 MINUTE"); // Prepares query to count attempts from this IP
+        $stmtLimit->execute([$ip]); // Executes the query using the captured IP address
+        if ($stmtLimit->fetchColumn() >= 3) { // Checks if the count of attempts is 3 or higher
+            http_response_code(429); // Sets HTTP status to 429 (Too Many Requests)
+            echo json_encode(['error' => 'Too many attempts. Please try again in 5 minutes.']); // Sends error message as JSON
+            exit; // Stops the script immediately to prevent further processing
         }
+        
         // Log the attempt
-        $pdo->prepare("INSERT INTO rate_limits (ip_address) VALUES (?)")->execute([$ip]);
+        $pdo->prepare("INSERT INTO rate_limits (ip_address) VALUES (?)")->execute([$ip]); // Records this specific attempt in the rate_limits table
 
         // --- PROTECTION 2: Robust Password Policy ---
-        // Requirements: 12+ chars, 1 Uppercase, 1 Number, 1 Special Character
-        $passwordRegex = '/^(?=.*[A-Z])(?=.*[0-9])(?=.*[\W_]).{12,}$/';
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || !preg_match($passwordRegex, $password) || empty($username)) {
-            echo json_encode(['error' => 'Invalid data. Password must be 12+ characters with a number and symbol.']);
-            exit;
+        $passwordRegex = '/^(?=.*[A-Z])(?=.*[0-9])(?=.*[\W_]).{12,}$/'; // Define regex for 12+ chars, 1 uppercase, 1 number, 1 symbol
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || !preg_match($passwordRegex, $password) || empty($username)) { // Validates all inputs at once
+            echo json_encode(['error' => 'Invalid data. Password must be 12+ characters with a number and symbol.']); // Sends validation error
+            exit; // Stops the script if validation fails
         }
 
         // --- PROTECTION 3: Check for Existing User ---
-        $stmtCheck = $pdo->prepare("SELECT id FROM users WHERE email = ?");
-        $stmtCheck->execute([$email]);
-        if ($stmtCheck->fetch()) {
-            echo json_encode(['error' => 'This email is already registered.']);
+        $stmtCheck = $pdo->prepare("SELECT id FROM users WHERE email = ?"); // Prepares query to find if the email is already in the database
+        $stmtCheck->execute([$email]); // Executes the check using the user's provided email
+        if ($stmtCheck->fetch()) { // If the query returns a result, the email is already taken
+            echo json_encode(['error' => 'This email is already registered.']); // Sends error saying email exists
             exit;
         }
 
         // --- PROTECTION 4: Secure Hashing ---
-        $hashedPassword = password_hash($password, PASSWORD_ARGON2ID);
+        $hashedPassword = password_hash($password, PASSWORD_ARGON2ID); // Scrambles the password using a high-security algorithm
 
-        $stmt = $pdo->prepare("INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, 'user')");
-        if ($stmt->execute([$username, $email, $hashedPassword])) {
-            echo json_encode(['success' => true, 'message' => 'Registration successful!']);
-        }
+        $stmt = $pdo->prepare("INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, 'user')"); // Prepares final insertion query
+        if ($stmt->execute([$username, $email, $hashedPassword])) { // Executes insertion with the hashed password instead of plain text
+            echo json_encode(['success' => true, 'message' => 'Registration successful!']); // Sends success response as JSON
+        } // Ends the insertion success block
         exit;
 
-    } catch (PDOException $e) {
-        error_log("Security Error: " . $e->getMessage());
-        echo json_encode(['error' => 'A server error occurred. Please try again later.']);
-        exit;
+    } catch (PDOException $e) { // If anything inside the "try" failed, this block catches the error
+        error_log("Security Error: " . $e->getMessage()); // Logs the technical error message privately on the server
+        echo json_encode(['error' => 'A server error occurred. Please try again later.']); // Sends a generic error message to the user
+        exit; 
     }
-}
+} 
 ?>
 
 <!DOCTYPE html>
