@@ -14,7 +14,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $password = $input['password'] ?? '';
 
     // 1. Basic Validation
-    if (empty($username) || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 8) {
+    if (empty($username) || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 12) {
         echo json_encode(['error' => 'Données invalides ou mot de passe trop court.']);
         exit;
     }
