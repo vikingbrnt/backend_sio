@@ -102,4 +102,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') { // Only executes the following code
         <a href="login.php" class="login-link">Déjà un compte ? Se connecter ici</a>
     </div>
 </body>
+<script async src="https://www.google.com/recaptcha/api.js"></script>
+<script>
+  if(typeof grecaptcha === 'undefined') {
+    grecaptcha = {
+      ready: function(cb) {
+        // window.__grecaptcha_cfg is a global variable that stores reCAPTCHA's
+        // configuration. By default, any functions listed in its 'fns' property
+        // are automatically executed when reCAPTCHA loads.
+        const c = '___grecaptcha_cfg';
+        window[c] = window[c] || {};
+        (window[c]['fns'] = window[c]['fns'] || []).push(cb);
+      }
+    };
+  }
+
+  // Usage
+  grecaptcha.ready(function(){
+    grecaptcha.render("container", {
+      sitekey: "ABC-123"
+    });
+  });
+</script>
 </html>
+
