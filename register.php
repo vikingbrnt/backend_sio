@@ -2,47 +2,70 @@
 session_start();
 require_once __DIR__ . '/dotenv.php';
 
+// Database Configuration
 $host = $_ENV['DB_HOST'] ?? 'localhost';
 $user = $_ENV['DB_USER'] ?? 'root';
 $pass = $_ENV['DB_PASS'] ?? '';
 $dbName = $_ENV['DB_NAME'] ?? 'backend';
 
+// Handle JSON POST requests
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    header('Content-Type: application/json');
     $input = json_decode(file_get_contents('php://input'), true);
+    
     $username = trim($input['username'] ?? '');
     $email = trim($input['email'] ?? '');
     $password = $input['password'] ?? '';
+    $ip = $_SERVER['REMOTE_ADDR'];
 
-    // 1. Basic Validation
-    if (empty($username) || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 12) {
-        echo json_encode(['error' => 'Données invalides ou mot de passe trop court.']);
-        exit;
-    }
-
-    // 2. Secure Connection (Using PDO is recommended over mysqli for better error handling)
     try {
         $dsn = "mysql:host=$host;dbname=$dbName;charset=utf8mb4";
         $pdo = new PDO($dsn, $user, $pass, [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
         ]);
 
-        // 3. Hash the password (using modern Argon2 or Bcrypt)
-        $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
+        // --- PROTECTION 1: Rate Limiting (Brute Force/Spam Prevention) ---
+        // Limits an IP to 3 registration attempts every 5 minutes
+        $stmtLimit = $pdo->prepare("SELECT COUNT(*) FROM rate_limits WHERE ip_address = ? AND attempt_time > NOW() - INTERVAL 5 MINUTE");
+        $stmtLimit->execute([$ip]);
+        if ($stmtLimit->fetchColumn() >= 3) {
+            http_response_code(429);
+            echo json_encode(['error' => 'Too many attempts. Please try again in 5 minutes.']);
+            exit;
+        }
+        // Log the attempt
+        $pdo->prepare("INSERT INTO rate_limits (ip_address) VALUES (?)")->execute([$ip]);
 
-        // 4. Prepared Statement
-        $stmt = $pdo->prepare("INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, 'user')");
-        
-        if ($stmt->execute([$username, $email, $hashedPassword])) {
-            echo json_encode(['success' => true, 'message' => 'Inscription réussie !']);
+        // --- PROTECTION 2: Robust Password Policy ---
+        // Requirements: 12+ chars, 1 Uppercase, 1 Number, 1 Special Character
+        $passwordRegex = '/^(?=.*[A-Z])(?=.*[0-9])(?=.*[\W_]).{12,}$/';
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || !preg_match($passwordRegex, $password) || empty($username)) {
+            echo json_encode(['error' => 'Invalid data. Password must be 12+ characters with a number and symbol.']);
+            exit;
         }
 
+        // --- PROTECTION 3: Check for Existing User ---
+        $stmtCheck = $pdo->prepare("SELECT id FROM users WHERE email = ?");
+        $stmtCheck->execute([$email]);
+        if ($stmtCheck->fetch()) {
+            echo json_encode(['error' => 'This email is already registered.']);
+            exit;
+        }
+
+        // --- PROTECTION 4: Secure Hashing ---
+        $hashedPassword = password_hash($password, PASSWORD_ARGON2ID);
+
+        $stmt = $pdo->prepare("INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, 'user')");
+        if ($stmt->execute([$username, $email, $hashedPassword])) {
+            echo json_encode(['success' => true, 'message' => 'Registration successful!']);
+        }
+        exit;
+
     } catch (PDOException $e) {
-        // 5. Professional Error Handling (Log it, don't show it)
-        error_log("Registration Error: " . $e->getMessage());
-        echo json_encode(['error' => 'Une erreur est survenue lors de l\'inscription.']);
+        error_log("Security Error: " . $e->getMessage());
+        echo json_encode(['error' => 'A server error occurred. Please try again later.']);
+        exit;
     }
-    
-    $conn->close();
 }
 ?>
 

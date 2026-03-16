@@ -1,7 +1,6 @@
 <?php
 header("Content-Security-Policy: default-src 'self'; script-src 'none'; style-src 'self' 'unsafe-inline';");
-?>
-<?php
+
 session_start();
 require_once __DIR__ . '/dotenv.php';
 
@@ -24,10 +23,26 @@ if ($conn->connect_error) {
 // Handle post submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['content'])) {
     $content = $_POST['content'];
-    $user_id = $_SESSION['user_id'];
     
-    $sql = "INSERT INTO posts (user_id, content) VALUES ($user_id, '$content')";
-    $conn->query($sql);
+    // Use the ID from your session
+    $user_id = $_SESSION['user_id'] ?? null;
+
+    if ($user_id && !empty($content)) {
+        // Use a Prepared Statement to avoid "Unknown Column" and SQL Injection errors
+        $stmt = $conn->prepare("INSERT INTO posts (user_id, content) VALUES (?, ?)");
+        
+        // Use "s" for string if your ID is a UUID like '0d503928', or "i" if it is an integer
+        $stmt->bind_param("ss", $user_id, $content); 
+        
+        if (!$stmt->execute()) {
+            error_log("Query failed: " . $stmt->error);
+        }
+        $stmt->close();
+        
+        // Redirect to avoid resubmitting on refresh
+        header("Location: " . $_SERVER['PHP_SELF']);
+        exit();
+    }
 }
 
 // Fetch all posts
